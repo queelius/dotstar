@@ -1,6 +1,10 @@
-# `dotstar`
+# `dotstar`: Simple Wildcard Addressing
 
-**Simple wildcard addressing for nested data structures.**
+> "Things should be made as simple as possible, but not simpler."
+>
+> — (Probably not) Albert Einstein
+
+**Find all values in a nested data structure that match a simple wildcard pattern.**
 
 ```python
 >>> from dotstar import search
@@ -9,15 +13,15 @@
 ['Alice', 'Bob']
 ```
 
-## Why? Pattern-Based Addressing
+## The Philosophy: Simple Patterns
 
-The `dot` ecosystem provides a layered approach to finding data:
+`dotstar` is the second layer in the `dot` ecosystem's **Addressing Pillar**. It introduces a single, powerful concept: the wildcard (`*`).
 
-* `dotget` uses **exact addressing** (`users.0`).
-* `dotstar` introduces **pattern addressing** (`users.*`).
-* `dotquery` provides **conditional addressing** (`users[status=active]`).
+1. **`dotget` (Exact Addressing):** For when you know the *exact* path to a value (`users.0.name`).
+2. **`dotstar` (Pattern Addressing):** For when you need to gather all items that match a simple wildcard pattern (`users.*.name`). It is the simplest tool for structural matching.
+3. **`dotselect` (Advanced Selection):** For when you need more complex queries, like attribute checks (`[name=Alice]`), deep searches (`..name`), and custom logic.
 
-`dotstar` is the simplest way to get all values that match a structural pattern, without needing to know the specific keys or indices.
+`dotstar` is for when you know the *shape* of the data you're looking for, but not the exact keys or indices. It's for gathering all children under a common parent, or all values for a specific key across a list of objects.
 
 ## Install
 
@@ -27,89 +31,100 @@ pip install dotstar
 
 ## Usage
 
-`dotstar` can be used as a Python library or as a command-line tool.
+### As a Library
 
-### CLI
-
-`dotstar` reads JSON or YAML from stdin and prints the results to stdout.
-
-```bash
-# Find all values matching the pattern
-cat data.json | dotstar "users.*.name"
-
-# Specify YAML input
-cat data.yaml | dotstar --input-format yaml "users.*.name"
-
-# Find all paths and values
-cat data.json | dotstar --find "users.*.name"
-```
-
-### Library
+`dotstar` provides two main functions: `search` (to get values) and `find_all` (to get `(path, value)` tuples).
 
 ```python
 from dotstar import search, find_all
 
-data = {"users": [{"name": "Alice"}, {"name": "Bob"}]}
+data = {
+    "users": [
+        {"id": 1, "name": "Alice", "status": "active"},
+        {"id": 2, "name": "Bob", "status": "inactive"},
+    ],
+    "groups": {
+        "admin": {"members": [1]},
+        "user": {"members": [2]}
+    }
+}
 
-# Get all values matching a pattern
-search(data, "users.*.name")
+# Get all user names
+names = search(data, "users.*.name")
 # -> ['Alice', 'Bob']
 
-# Get all (path, value) tuples matching a pattern
-find_all(data, "users.*.name")
-# -> [('users.0.name', 'Alice'), ('users.1.name', 'Bob')]
-```
-
-## The `*` Wildcard
-
-The star (`*`) is the one piece of syntax `dotstar` adds. It means "match all items in a list" or "match all values in a dictionary."
-
-```python
-from dotstar import search
-
-data = {"sections": {"a": {"val": 1}, "b": {"val": 2}}}
-
-# Get all 'val' keys from all sections
-values = search(data, "sections.*.val")
+# Get all member IDs from all groups
+member_ids = search(data, "groups.*.members.*")
 # -> [1, 2]
+
+# Find the exact paths of all user statuses
+statuses = find_all(data, "users.*.status")
+# -> [('users.0.status', 'active'), ('users.1.status', 'inactive')]
 ```
 
-## Finding Paths for Composition
+The `find_all` function is useful for discovering paths that you can then use with other tools, like `dotmod` or `dotbatch`.
 
-Sometimes you need to know *where* the values came from. This is crucial for composing with other tools, like `dotbatch`. The `find_all` function returns both the exact path and the value.
+### From the Command Line
+
+`dotstar` reads JSON from stdin and prints matching values to stdout.
+
+```sh
+# Find all user names in a JSON file
+$ cat users.json | dotstar "users.*.name"
+"Alice"
+"Bob"
+```
+
+## Boundaries: When to Use `dotstar`
+
+Use `dotstar` when you need to:
+✅ Get all items from a list.
+✅ Get all values from a dictionary.
+✅ Extract all values for a specific key from a list of objects (e.g., all `name`s from all `users`).
+✅ Find the exact paths of multiple items that match a structural pattern.
+
+Do **not** use `dotstar` when you need to:
+❌ Get just one specific value. **Use `dotget`**.
+❌ Filter items based on their values (`[status=active]`). **Use `dotselect`**.
+❌ Perform deep, recursive searches for a key (`..name`). **Use `dotselect`**.
+❌ Modify data in place. **Use `dotmod`**.
+
+## "Steal This Code"
+
+Don't want a dependency? The core of `dotstar` is a single recursive function. Copy it.
 
 ```python
-from dotstar import find_all
+def search(data, pattern):
+    """Searches data for a dot-separated pattern with '*' wildcards."""
+    results = []
+    
+    def _search_recursive(sub_data, segments):
+        if not segments:
+            results.append(sub_data)
+            return
 
-data = {"users": [{"name": "Alice"}, {"name": "Bob"}]}
-results = find_all(data, "users.*.name")
-# -> [('users.0.name', 'Alice'), ('users.1.name', 'Bob')]
+        segment = segments[0]
+        remaining = segments[1:]
 
-# This output can now be used to build a dotbatch transaction
-# to modify Alice's name without knowing her index beforehand.
+        if segment == '*':
+            if isinstance(sub_data, dict):
+                for value in sub_data.values():
+                    _search_recursive(value, remaining)
+            elif isinstance(sub_data, list):
+                for item in sub_data:
+                    _search_recursive(item, remaining)
+        else:
+            try:
+                if isinstance(sub_data, list) and segment.isdigit():
+                    next_data = sub_data[int(segment)]
+                elif isinstance(sub_data, dict):
+                    next_data = sub_data[segment]
+                else:
+                    return
+                _search_recursive(next_data, remaining)
+            except (KeyError, IndexError, TypeError):
+                return
+
+    _search_recursive(data, pattern.split('.'))
+    return results
 ```
-
-## When to use `dotstar`
-
-✅ You need all values that match a simple structural pattern.
-✅ You're extracting data for analysis or transformation.
-✅ You need to find the exact paths of multiple items to feed into another tool.
-
-## When NOT to use `dotstar`
-
-❌ You need conditional filtering (e.g., `[key=value]`). **Use `dotquery`**. `dotstar` deliberately omits these for simplicity.
-❌ You only need a single, known path. **Use `dotget`**.
-
-## Philosophy: The Butter Knife
-
-`dotstar` does one thing: find all paths matching a wildcard pattern. It is the simple, safe, and reliable "butter knife" of the addressing layer.
-
-It is not a query language. It is not a transformation tool. It is the pure and simple tool for when you need a wildcard, and nothing more. This simplicity is a feature.
-
-## License
-
-MIT. Use it however you like.
-
----
-
-> "Make it as simple as possible, but not simpler." - Albert Einstein
