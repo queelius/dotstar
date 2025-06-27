@@ -10,10 +10,6 @@ Basic usage:
     ['Alice', 'Bob']
 """
 
-__version__ = "1.0.0"
-__all__ = ["search", "find_all", "Pattern"]
-
-
 def search(data, pattern):
     """
     Search for all values matching a pattern with wildcards.

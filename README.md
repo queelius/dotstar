@@ -1,20 +1,23 @@
-# dotstar
+# `dotstar`
 
-**Wildcard patterns for dotget paths.**
+**Simple wildcard addressing for nested data structures.**
 
 ```python
 >>> from dotstar import search
->>> data = {"users": [{"name": "Alice", "email": "alice@example.com"}, 
-...                   {"name": "Bob", "email": "bob@example.com"}]}
->>> search(data, "users.*.email")
-['alice@example.com', 'bob@example.com']
+>>> data = {"users": [{"name": "Alice"}, {"name": "Bob"}]}
+>>> search(data, "users.*.name")
+['Alice', 'Bob']
 ```
 
-## Why?
+## Why? Pattern-Based Addressing
 
-[dotget](https://github.com/yourusername/dotget) gives you simple paths to single values.
+The `dot` ecosystem provides a layered approach to finding data:
 
-Sometimes you need all matching values. That's what dotstar does.
+* `dotget` uses **exact addressing** (`users.0`).
+* `dotstar` introduces **pattern addressing** (`users.*`).
+* `dotquery` provides **conditional addressing** (`users[status=active]`).
+
+`dotstar` is the simplest way to get all values that match a structural pattern, without needing to know the specific keys or indices.
 
 ## Install
 
@@ -22,138 +25,86 @@ Sometimes you need all matching values. That's what dotstar does.
 pip install dotstar
 ```
 
-Requires Python 3.6+. No other dependencies.
+## Usage
 
-## The Star of the Show
+`dotstar` can be used as a Python library or as a command-line tool.
 
-One new symbol: `*` means "all keys" or "all indices".
+### CLI
+
+`dotstar` reads JSON or YAML from stdin and prints the results to stdout.
+
+```bash
+# Find all values matching the pattern
+cat data.json | dotstar "users.*.name"
+
+# Specify YAML input
+cat data.yaml | dotstar --input-format yaml "users.*.name"
+
+# Find all paths and values
+cat data.json | dotstar --find "users.*.name"
+```
+
+### Library
+
+```python
+from dotstar import search, find_all
+
+data = {"users": [{"name": "Alice"}, {"name": "Bob"}]}
+
+# Get all values matching a pattern
+search(data, "users.*.name")
+# -> ['Alice', 'Bob']
+
+# Get all (path, value) tuples matching a pattern
+find_all(data, "users.*.name")
+# -> [('users.0.name', 'Alice'), ('users.1.name', 'Bob')]
+```
+
+## The `*` Wildcard
+
+The star (`*`) is the one piece of syntax `dotstar` adds. It means "match all items in a list" or "match all values in a dictionary."
 
 ```python
 from dotstar import search
 
-data = {
-    "departments": {
-        "engineering": {
-            "employees": [
-                {"name": "Alice", "level": "senior"},
-                {"name": "Bob", "level": "junior"}
-            ]
-        },
-        "sales": {
-            "employees": [
-                {"name": "Carol", "level": "senior"},
-                {"name": "Dan", "level": "junior"}
-            ]
-        }
-    }
-}
+data = {"sections": {"a": {"val": 1}, "b": {"val": 2}}}
 
-# Get all employee names across all departments
-names = search(data, "departments.*.employees.*.name")
-# ['Alice', 'Bob', 'Carol', 'Dan']
-
-# Get all senior employees
-seniors = search(data, "departments.*.employees.*.level")
-# ['senior', 'junior', 'senior', 'junior']
+# Get all 'val' keys from all sections
+values = search(data, "sections.*.val")
+# -> [1, 2]
 ```
 
-## Finding Paths
+## Finding Paths for Composition
 
-Sometimes you need to know where values came from:
+Sometimes you need to know *where* the values came from. This is crucial for composing with other tools, like `dotbatch`. The `find_all` function returns both the exact path and the value.
 
 ```python
 from dotstar import find_all
 
-# Find all paths and values
-results = find_all(data, "departments.*.employees.*.name")
-# [
-#   ('departments.engineering.employees.0.name', 'Alice'),
-#   ('departments.engineering.employees.1.name', 'Bob'),
-#   ('departments.sales.employees.0.name', 'Carol'),
-#   ('departments.sales.employees.1.name', 'Dan')
-# ]
+data = {"users": [{"name": "Alice"}, {"name": "Bob"}]}
+results = find_all(data, "users.*.name")
+# -> [('users.0.name', 'Alice'), ('users.1.name', 'Bob')]
 
-# Now you know exactly where each value lives
-for path, name in results:
-    print(f"{name} is at {path}")
+# This output can now be used to build a dotbatch transaction
+# to modify Alice's name without knowing her index beforehand.
 ```
 
-## Pattern Objects
+## When to use `dotstar`
 
-For reusable patterns:
+✅ You need all values that match a simple structural pattern.
+✅ You're extracting data for analysis or transformation.
+✅ You need to find the exact paths of multiple items to feed into another tool.
 
-```python
-from dotstar import Pattern
+## When NOT to use `dotstar`
 
-# Define reusable patterns
-ALL_USERS = Pattern("users.*")
-ALL_EMAILS = ALL_USERS / "email"
-ACTIVE_USERS = Pattern("users.*.status")
+❌ You need conditional filtering (e.g., `[key=value]`). **Use `dotquery`**. `dotstar` deliberately omits these for simplicity.
+❌ You only need a single, known path. **Use `dotget`**.
 
-# Use them on different data
-emails = ALL_EMAILS.search(data1)
-more_emails = ALL_EMAILS.search(data2)
-```
+## Philosophy: The Butter Knife
 
-## Works with dotget
+`dotstar` does one thing: find all paths matching a wildcard pattern. It is the simple, safe, and reliable "butter knife" of the addressing layer.
 
-dotstar is designed to complement dotget:
-
-```python
-from dotget import get
-from dotstar import search
-
-# Get one user's email
-email = get(data, "users.0.email")
-
-# Get all users' emails  
-emails = search(data, "users.*.email")
-```
-
-Same syntax, different results. Use the right tool for the job.
-
-## When to use dotstar
-
-✅ You need all matching values from nested data  
-✅ You're extracting data for analysis or transformation  
-✅ You want to find patterns in JSON responses  
-✅ You're building a simple data query tool  
-
-## When NOT to use dotstar
-
-❌ You need complex queries (use JMESPath or JSONPath)  
-❌ You need conditional filtering (use list comprehensions)  
-❌ You're working with huge datasets (this loads everything)  
-❌ You need aggregations or transformations (use pandas)  
-
-## The Pattern Language
-
-- **Dots** traverse objects: `user.name`
-- **Numbers** index arrays: `items.0`
-- **Stars** match all: `users.*`
-
-You can combine them:
-- `users.*.addresses.0.city` - First address city for all users
-- `data.*.*.id` - All IDs two levels deep
-- `response.items.*` - All items in response
-
-## Philosophy
-
-dotstar does one thing: find all values matching a pattern. It's not trying to be:
-- A query language (that's JMESPath)
-- A transformation tool (that's jq)  
-- A validation library (that's jsonschema)
-
-It's just wildcards for paths. Simple enough to understand immediately, powerful enough to be useful.
-
-## Performance Note
-
-dotstar is designed for convenience, not speed. It:
-- Traverses the entire data structure
-- Returns all matches in a list
-- Works best with reasonably-sized data
-
-For large datasets or performance-critical code, consider streaming approaches or specialized tools.
+It is not a query language. It is not a transformation tool. It is the pure and simple tool for when you need a wildcard, and nothing more. This simplicity is a feature.
 
 ## License
 
@@ -161,4 +112,4 @@ MIT. Use it however you like.
 
 ---
 
-*"Make it as simple as possible, but not simpler."* - Albert Einstein
+> "Make it as simple as possible, but not simpler." - Albert Einstein
